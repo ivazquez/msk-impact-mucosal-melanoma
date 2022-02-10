@@ -1,0 +1,327 @@
+---
+title: "MSK IMPACT"
+subtitle: "Mucosal melanoma"
+author:
+  - "Ignacio Vazquez-Garcia"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    highlight: tango
+    df_print: paged
+    code_folding: hide
+    fig_align: center
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: yes
+params:
+   rmd: "cohort_overview.Rmd"
+---
+
+# Cohort overview
+
+```{r setup, include=FALSE}
+# Global knit options
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+
+# Global chunk options
+knitr::opts_chunk$set(echo=FALSE, tidy=TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(cowplot)
+library(grid) 
+library(ComplexHeatmap)
+library(RColorBrewer)
+
+source("src/global_vars.R")
+source("src/plot_oncoprint_heatmap.R")
+```
+
+# MSK IMPACT
+
+## Clinical data
+
+```{r}
+# Load all IMPACT data
+samples <- readr::read_tsv("/work/shah/vazquezi/projects/dmp-2022/mskimpact/data_clinical_sample.txt", comment = "#")
+
+# Clean up column names
+names(samples) <- tolower(names(samples))
+
+# Add custom IMPACT annotations
+samples <- samples %>% 
+  dplyr::rename("impact_dmp_sample_id" = "sample_id", "impact_dmp_patient_id" = "patient_id")
+
+samples
+```
+
+```{r}
+
+included_samples <- samples %>%
+  filter(cancer_type_detailed %in% c("Mucosal Melanoma of the Esophagus",
+                                     "Mucosal Melanoma of the Urethra",
+                                     "Mucosal Melanoma of the Vulva/Vagina")) %>%
+  pull(impact_dmp_sample_id)
+
+included_samples
+
+```
+
+## SNVs and indels
+
+```{r}
+# Load SNV/indel data
+snv <- readr::read_tsv("/work/shah/vazquezi/projects/dmp-2022/mskimpact/data_mutations_extended.txt", comment = "#")
+
+# Clean up column names
+names(snv) <- tolower(names(snv))
+
+# Remove duplicated columns
+snv <- snv[, !duplicated(colnames(snv))]
+
+# Annotate SNVs
+snv <- snv %>% 
+  # Add IMPACT sample annotations
+  dplyr::rename("impact_dmp_sample_id" = "tumor_sample_barcode") %>%
+  # Filter selected samples
+  dplyr::filter(impact_dmp_sample_id %in% included_samples) %>%
+  dplyr::left_join(samples, by = "impact_dmp_sample_id")
+
+# Remap SNV annotations for plotting
+snv <- snv %>% 
+  # Remap germline/somatic status for plotting
+  dplyr::mutate(
+    mutation_status = str_to_sentence(mutation_status),
+    mutation_status = recode(mutation_status, `Germline`="Germline", `Somatic`="")) %>%
+  # Coarse-grained definition of variant types
+  dplyr::mutate(
+    variant_type_short = recode(variant_type, `SNP`="MUT", `DNP`="MUT", `TNP`="MUT", `ONP`="MUT", `INS`="MUT", `DEL`="MUT")) %>%
+  # Coarse-grained variant classification
+  dplyr::mutate(
+    variant_classification_short=recode(variant_classification, 
+      `Missense_Mutation`="Missense_Mutation",
+      `Nonsense_Mutation`="Truncating_Mutation", 
+      `Frame_Shift_Ins`="Truncating_Mutation", 
+      `Frame_Shift_Del`="Truncating_Mutation", 
+      `In_Frame_Ins`="In_Frame_Mutation", 
+      `In_Frame_Del`="In_Frame_Mutation", 
+      `Splice_Site`="Truncating_Mutation", 
+      `Nonstop_Mutation`="Unknown",
+      `Splice_Region`="Unknown",
+      `5'Flank`="Unknown",
+      `3'Flank`="Unknown",
+      `5'UTR`="Unknown",
+      `Silent`="Unknown",
+      `Translation_Start_Site`="Unknown",
+      `Intron`="Unknown"))
+ 
+snv
+```
+
+## Copy number
+
+### Gene-level alterations
+
+```{r}
+# Load CNA data
+cna <- readr::read_tsv("/work/shah/vazquezi/projects/dmp-2022/mskimpact/data_CNA.txt")
+
+# Pivot wide to long
+cna <- cna %>% pivot_longer(-c("Hugo_Symbol"), names_to = "sample_id", values_to = "copy_number")
+
+# Clean up column names
+names(cna) <- tolower(names(cna))
+
+# Annotate CNAs
+cna <- cna %>% 
+  # Add IMPACT sample annotations
+  dplyr::rename("impact_dmp_sample_id" = "sample_id") %>%
+  # Filter selected samples
+  dplyr::filter(impact_dmp_sample_id %in% included_samples) %>%
+  dplyr::left_join(samples, by = "impact_dmp_sample_id") %>%
+  # Add cancer gene annotation
+  mutate(cna_type = case_when(copy_number > 0 ~ "AMP", copy_number < 0 ~ "HOMDEL"))
+
+cna
+```
+
+### FACETS
+
+```{r}
+# Load CNA data
+facets <- readr::read_tsv("/juno/work/ccs/shared/resources/impact/cohort-level/50K/facets/2022_02_09/msk_impact_facets_annotated.cohort.txt.gz")
+
+# Annotate FACETS
+facets <- facets %>%
+  # Add IMPACT sample annotations
+  dplyr::rename("impact_dmp_sample_id" = "tumor_sample") 
+
+facets
+```
+
+## Fusions
+
+```{r}
+# Load fusion data
+fusions <- readr::read_tsv("/work/shah/vazquezi/projects/dmp-2022/mskimpact/data_fusions.txt")
+
+# Clean up column names
+names(fusions) <- tolower(names(fusions))
+
+# Annotate fusions
+fusions <- fusions %>% 
+  # Add IMPACT sample annotations
+  dplyr::rename("impact_dmp_sample_id" = "tumor_sample_barcode") %>%
+  # Filter selected samples
+  dplyr::filter(impact_dmp_sample_id %in% included_samples) %>%
+  dplyr::left_join(samples, by = "impact_dmp_sample_id") %>%
+  mutate(fusion_type = "Fusion")
+
+fusions
+```
+
+```{r}
+
+snv_tbl <- snv %>%
+  complete(impact_dmp_sample_id, nesting(hugo_symbol))
+
+cna_tbl <- cna %>%
+  complete(impact_dmp_sample_id, nesting(hugo_symbol))
+
+fusions_tbl <- fusions %>%
+  complete(impact_dmp_sample_id, nesting(hugo_symbol))
+
+snv_cna_fusions_tbl <- bind_rows(snv_tbl, cna_tbl, fusions_tbl) %>%
+  unite("type", c("variant_type_short","variant_classification_short","cna_type","fusion_type","mutation_status"), sep=",", na.rm = TRUE, remove = FALSE)
+
+```
+
+# Inventory plot
+
+# OncoPrint plot
+
+```{r, fig.width = 12, fig.height = 6}
+
+snv_cna_fusions_wide_tbl <- snv_cna_fusions_tbl %>%
+  pivot_wider(
+    id_cols = "hugo_symbol",
+    names_from = "impact_dmp_sample_id",
+    values_from = "type",
+    values_fn = list(type = ~ str_c(., collapse = ","))
+  ) %>%
+  arrange(hugo_symbol)
+
+included_genes <-
+  c("TP53",
+    "ATRX",
+    "SF3B1",
+    "KIT",
+    "NRAS",
+    "BRAF",
+    "EGFR",
+    "CDKN2A",
+    "NF1",
+    "CD274")
+
+# Create OncoPrint matrix
+oncoprint_main_mat <- snv_cna_fusions_wide_tbl %>%
+  # Keep included genes
+  filter(hugo_symbol %in% included_genes) %>%
+  arrange(match(hugo_symbol, included_genes)) %>%
+  column_to_rownames(var = "hugo_symbol") %>%
+  as.matrix
+
+# Top heatmap annotation
+top_df <- samples %>%
+  dplyr::filter(impact_dmp_sample_id %in% included_samples) %>% 
+  dplyr::left_join(facets, by = "impact_dmp_sample_id") %>%
+  arrange(match(impact_dmp_sample_id, colnames(oncoprint_main_mat))) %>%
+  # Limit max ploidy range to 6+
+  mutate(ploidy = ifelse(ploidy > 6, 6, ploidy)) %>%
+  # Define plotting order of annotations
+  mutate(oncotree_code = ordered(oncotree_code, levels = names(clrs$oncotree_code)),
+         sample_type = ordered(sample_type, levels = names(clrs$sample_type)),
+         wgd = ordered(wgd, levels = names(clrs$wgd))) %>%
+  dplyr::select(wgd, ploidy, fga, oncotree_code, sample_type) %>%
+  as.data.frame
+
+colnames(top_df) <- c("WGD", "Ploidy", "FGA", "Oncotree code", "Sample type")
+colours <-
+  list(
+    "WGD" = clrs$wgd,
+    "Purity" = circlize::colorRamp2(seq(0, 1, 0.2), brewer.pal(6, "GnBu")),
+    "Ploidy" = circlize::colorRamp2(as.numeric(names(clrs$ploidy)), clrs$ploidy),
+    "FGA"= circlize::colorRamp2(seq(0, 1, 0.2), brewer.pal(6, "GnBu")),
+    "Oncotree code" = clrs$oncotree_code,
+    "Sample type" = clrs$sample_type
+  )
+
+top_annotation <- columnAnnotation(
+  df = top_df,
+  col = colours,
+  annotation_width = unit(c(1, 4), "cm"),
+  show_legend = c(TRUE),
+  show_annotation_name = TRUE,
+  annotation_name_side = "left",
+  annotation_name_gp = list(fontsize = 10),
+  simple_anno_size = unit(0.35, "cm"),
+  gap = unit(1, "mm")
+)
+
+# Right annotation
+right_annotation = rowAnnotation(
+  row_barplot = anno_oncoprint_barplot(
+    # only MUT, AMP, HOMDEL and Fusion
+    c("MUT", "AMP", "HOMDEL", "Fusion"),
+    border = FALSE,
+    bar_width = 0.6,
+    height = unit(4, "cm"),
+    axis_param = list(side = "bottom", labels_rot = 90)
+  ),
+  name = "# alterations\nper gene",
+  show_annotation_name = TRUE,
+  annotation_name_gp = list(fontsize = 8)
+)
+
+# colnames(oncoprint_main_mat) <- NULL
+
+oncoprint_main_ht <-
+  plot_oncoprint_heatmap(
+    mat = oncoprint_main_mat,
+    top_annotation = top_annotation,
+    bottom_annotation = bottom_annotation,
+    right_annotation = right_annotation,
+    column_split = top_df$`WGD`
+  )
+
+oncoprint_main_lgd_list <- plot_oncoprint_legend()
+
+oncoprint_main_ht_rendered <- ComplexHeatmap::draw(
+  oncoprint_main_ht,
+  merge_legends = TRUE,
+  heatmap_legend_side = "bottom",
+  annotation_legend_side = "bottom",
+  heatmap_legend_list = oncoprint_main_lgd_list
+)
+
+rownames(oncoprint_main_ht@matrix)
+
+colnames(oncoprint_main_ht@matrix)
+
+cairo_pdf("figures/oncoprint_msk_impact_mucosal_melanoma_patients.pdf", width = 12, height = 6)
+print(oncoprint_main_ht_rendered)
+dev.off()
+
+png("figures/oncoprint_msk_impact_mucosal_melanoma_patients.png", width = 12, height = 6, res = 300)
+print(oncoprint_main_ht)
+dev.off()
+
+```
+
+# Session
+
+```{r}
+sessionInfo()
+```

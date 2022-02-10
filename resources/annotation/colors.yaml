@@ -1,0 +1,40 @@
+mutation:
+  DEL: "#374b88"
+  AMP: "#c83934"
+  MUT: "#adadaa"
+  SNP: "#008000"
+  INS: "pink"
+  ONP: "white"
+  DNP: "white"
+  HOMDEL: "#374b88"
+  Germline: "white"
+  Somatic: "black"
+  Fusion: "#6e3171"
+  Unknown: "grey"
+  Missense_Mutation: "#6a9492"
+  Truncating_Mutation: "#724b86"
+  In_Frame_Mutation: "#b3653a"
+oncotree_code:
+  ESMM: "#99D8C9"
+  URMM: "#66C2A4"
+  VMM: "#41AE76"
+sample_type:
+  Primary: "#ff0000"
+  Local Recurrence: "#56B4E9" # palette_OkabeIto[2]
+  Metastasis: "#0072B2" # palette_OkabeIto[3]
+wgd:
+  TRUE: "#FC8D59"
+  FALSE: "#CCCCCC"
+ploidy:
+  0: "#3182BD"
+  1: "#9ECAE1"
+  2: "#CCCCCC"
+  3: "#FDCC8A"
+  4: "#FC8D59"
+  5: "#E34A33"
+  #6: "#B30000"
+  #7: "#980043"
+  #8: "#DD1C77"
+  #9: "#DF65B0"
+  #10: "#C994C7"
+  # 11+: "#D4B9DA"
